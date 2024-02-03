@@ -8,9 +8,10 @@ import (
     "image/jpeg"
     "math"
     "os"
-    "runtime"
     "sync"
+    "image/draw"
 )
+
 
 func main() {
     var inputFile, outputFile string
