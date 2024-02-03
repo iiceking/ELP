@@ -1,0 +1,10 @@
+Compile with go build main.go.
+Run with ./main -input=<input.jpg> -output=<output.jpg>.
+Optional: Adjust output quality using -quality=75
+This Go program features several key functions for image processing:
+loadImage loads an image from a file, grayscale converts the image 
+to grayscale, and applyConvolution applies an edge detection kernel 
+(defined in getEdgeDetectionKernel) to highlight edges.
+The saveImage function then saves the processed image. 
+The program uses Go's concurrency for efficiency and supports command-line arguments for input, output, and JPEG quality settings.
+the result is output.jpg
