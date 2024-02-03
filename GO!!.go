@@ -1,40 +1,45 @@
 package main
 
 import (
+    "flag"
     "fmt"
     "image"
     "image/color"
-    "image/draw"
+    "image/jpeg"
     "math"
     "os"
+    "runtime"
+    "sync"
 )
 
 func main() {
-    // Load the image
-    inputFile := "input.jpg" // Change this to your input image file
+    var inputFile, outputFile string
+    var jpegQuality int
+    flag.StringVar(&inputFile, "input", "input.jpg", "Input image file")
+    flag.StringVar(&outputFile, "output", "output.jpg", "Output image file")
+    flag.IntVar(&jpegQuality, "quality", 75, "JPEG quality for the output image")
+    flag.Parse()
+
     img, err := loadImage(inputFile)
     if err != nil {
-        fmt.Println("Error loading image:", err)
+        fmt.Printf("Error loading image '%s': %v\n", inputFile, err)
         return
     }
 
-    // Apply grayscale conversion
     grayscaleImg := grayscale(img)
-
-    // Apply edge detection using convolution
     edgeImg := applyConvolution(grayscaleImg, getEdgeDetectionKernel())
 
-    // Convert the resulting image array back to an image
     outputImage := image.NewRGBA(grayscaleImg.Bounds())
     draw.Draw(outputImage, outputImage.Bounds(), edgeImg, image.Point{}, draw.Src)
 
-    // Save the resulting image
-    outputFile := "output.jpg" // Change this to your output image file
-    saveImage(outputFile, outputImage)
+    if err := saveImage(outputFile, outputImage, jpegQuality); err != nil {
+        fmt.Printf("Error saving image '%s': %v\n", outputFile, err)
+        return
+    }
+
     fmt.Println("Edge detection applied and saved to", outputFile)
 }
 
-// Load an image from file
 func loadImage(filename string) (image.Image, error) {
     file, err := os.Open(filename)
     if err != nil {
@@ -43,68 +48,66 @@ func loadImage(filename string) (image.Image, error) {
     defer file.Close()
 
     img, _, err := image.Decode(file)
-    if err != nil {
-        return nil, err
-    }
-
-    return img, nil
+    return img, err
 }
 
-// Save an image to file
-func saveImage(filename string, img image.Image) error {
+func saveImage(filename string, img image.Image, quality int) error {
     file, err := os.Create(filename)
     if err != nil {
         return err
     }
     defer file.Close()
 
-    err = image.JPEG.Encode(file, img, nil)
-    if err != nil {
-        return err
-    }
-
-    return nil
+    return jpeg.Encode(file, img, &jpeg.Options{Quality: quality})
 }
 
-// Convert an image to grayscale
 func grayscale(img image.Image) *image.Gray {
     bounds := img.Bounds()
     gray := image.NewGray(bounds)
 
+    var wg sync.WaitGroup
     for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-        for x := bounds.Min.X; x < bounds.Max.X; x++ {
-            grayColor := color.GrayModel.Convert(img.At(x, y))
-            gray.Set(x, y, grayColor.(color.Gray))
-        }
+        wg.Add(1)
+        go func(y int) {
+            defer wg.Done()
+            for x := bounds.Min.X; x < bounds.Max.X; x++ {
+                grayColor := color.GrayModel.Convert(img.At(x, y))
+                gray.Set(x, y, grayColor.(color.Gray))
+            }
+        }(y)
     }
+    wg.Wait()
 
     return gray
 }
 
-// Apply convolution to an image using a given kernel
-func applyConvolution(img image.Image, kernel [][]float64) *image.Gray {
+func applyConvolution(img *image.Gray, kernel [][]float64) *image.Gray {
     bounds := img.Bounds()
-    gray := image.NewGray(bounds)
+    newImg := image.NewGray(bounds)
     width, height := bounds.Dx(), bounds.Dy()
 
+    var wg sync.WaitGroup
     for y := 1; y < height-1; y++ {
-        for x := 1; x < width-1; x++ {
-            var sum float64
-            for ky := -1; ky <= 1; ky++ {
-                for kx := -1; kx <= 1; kx++ {
-                    pixel := color.GrayModel.Convert(img.At(x+kx, y+ky)).(color.Gray)
-                    sum += float64(pixel.Y) * kernel[ky+1][kx+1]
+        wg.Add(1)
+        go func(y int) {
+            defer wg.Done()
+            for x := 1; x < width-1; x++ {
+                var sum float64
+                for ky := -1; ky <= 1; ky++ {
+                    for kx := -1; kx <= 1; kx++ {
+                        pixel := img.GrayAt(x+kx, y+ky)
+                        sum += float64(pixel.Y) * kernel[ky+1][kx+1]
+                    }
                 }
+                newImg.SetGray(x, y, color.Gray{Y: uint8(math.Abs(sum))})
             }
-            grayColor := color.Gray{Y: uint8(math.Abs(sum))}
-            gray.Set(x, y, grayColor)
-        }
+        }(y)
     }
+    wg.Wait()
 
-    return gray
+    return newImg
 }
 
-// Define a kernel for edge detection
 func getEdgeDetectionKernel() [][]float64 {
     return [][]float64{
         {-1, -1, -1},
